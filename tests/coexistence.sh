@@ -67,7 +67,7 @@ reported_host_b="$(podman exec "$name_b" hostname)"
 system_uri_a="ipp://127.0.0.1:${port_a}/ipp/system"
 system_uri_b="ipp://127.0.0.1:${port_b}/ipp/system"
 drivers_a="$(podman exec "$name_a" hplip-printer-app -u "$system_uri_a" drivers)"
-model_a="$(printf '%s\n' "$drivers_a" | grep -i 'deskjet 990c' | grep -i hpcups | sed -n '1s/[[:space:]].*//p')"
+model_a="$(printf '%s\n' "$drivers_a" | grep '^hp--deskjet-990-c--en ' | sed -n '1s/[[:space:]].*//p')"
 [[ -n "$model_a" ]]
 podman exec "$name_a" hplip-printer-app -u "$system_uri_a" \
   -d family-a-printer -m "$model_a" -v "cups:socket://127.0.0.1:9100" add
