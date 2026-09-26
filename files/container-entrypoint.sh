@@ -12,6 +12,65 @@ if (( port < 1024 || port > 65535 )); then
   exit 64
 fi
 
+# Web admin is authenticated or disabled, never silently open (ChairLift
+# ADR-0016). name_re bounds auth-service and admin-group to values PAM and
+# getent can look up safely; server-options is checked against PAPPL's own
+# documented token set instead of being passed through verbatim.
+name_re='^[A-Za-z0-9_.-]+$'
+auth_service="${PRINTER_APP_AUTH_SERVICE:-}"
+admin_group="${PRINTER_APP_ADMIN_GROUP:-}"
+server_options="${PRINTER_APP_SERVER_OPTIONS:-}"
+extra_opts=()
+
+if [[ -n "$auth_service" ]]; then
+  if [[ ! "$auth_service" =~ $name_re ]]; then
+    printf 'PRINTER_APP_AUTH_SERVICE must be a PAM service name (letters, digits, ".", "_", "-")\n' >&2
+    exit 64
+  fi
+  if [[ ! -e "/etc/pam.d/$auth_service" ]]; then
+    printf 'PRINTER_APP_AUTH_SERVICE=%s has no /etc/pam.d/%s in this image; ship that PAM service or use PRINTER_APP_SERVER_OPTIONS=no-web-interface instead\n' \
+      "$auth_service" "$auth_service" >&2
+    exit 64
+  fi
+  extra_opts+=(-o "auth-service=$auth_service")
+fi
+
+if [[ -n "$admin_group" ]]; then
+  if [[ -z "$auth_service" ]]; then
+    printf 'PRINTER_APP_ADMIN_GROUP requires PRINTER_APP_AUTH_SERVICE; an admin group with no authentication does not restrict anything\n' >&2
+    exit 64
+  fi
+  if [[ ! "$admin_group" =~ $name_re ]]; then
+    printf 'PRINTER_APP_ADMIN_GROUP must be a group name (letters, digits, ".", "_", "-")\n' >&2
+    exit 64
+  fi
+  if ! getent group "$admin_group" >/dev/null; then
+    printf 'PRINTER_APP_ADMIN_GROUP=%s does not exist in this image\n' "$admin_group" >&2
+    exit 64
+  fi
+  extra_opts+=(-o "admin-group=$admin_group")
+fi
+
+if [[ -n "$server_options" ]]; then
+  allowed_options=(none dnssd-host no-multi-queue raw-socket usb-printer no-web-interface web-log web-network web-remote web-security no-tls)
+  IFS=',' read -r -a requested_options <<<"$server_options"
+  for option in "${requested_options[@]}"; do
+    known=0
+    for allowed in "${allowed_options[@]}"; do
+      if [[ "$option" == "$allowed" ]]; then
+        known=1
+        break
+      fi
+    done
+    if [[ "$known" -ne 1 ]]; then
+      printf 'PRINTER_APP_SERVER_OPTIONS has unknown option %s; allowed: %s\n' \
+        "$option" "${allowed_options[*]}" >&2
+      exit 64
+    fi
+  done
+  extra_opts+=(-o "server-options=$server_options")
+fi
+
 state=/var/lib/hplip-printer-app
 mkdir -p "$state/ppd" "$state/spool" "$state/usb" "$state/cups/ssl" "$state/snmp" "$state/run" /run/dbus /run/avahi-daemon /run/hplip-printer-app
 if [[ -O "$state" ]]; then chmod 0700 "$state"; fi
@@ -73,7 +132,7 @@ for _ in $(seq 1 30); do
 done
 [[ -f /run/avahi-daemon/pid ]]
 
-hplip-printer-app -o "server-port=$port" -o "log-file=$state/hplip-printer-app.log" server &
+hplip-printer-app -o "server-port=$port" -o "log-file=$state/hplip-printer-app.log" "${extra_opts[@]}" server &
 children+=("$!")
 
 if wait -n "${children[@]}"; then
