@@ -182,6 +182,17 @@ host, each container must be its own DNS-SD and USB owner:
   This proves the two synthetic appliances do not collide with each other;
   it does not exercise real USB hardware, so shared-bus contention with an
   actual physical HP device remains unverified until hardware is available.
+- The image ships none of Avahi's sample remote-login records: this
+  appliance serves neither SSH nor SFTP, so advertising `_ssh._tcp` or
+  `_sftp-ssh._tcp` under the host's name would misdirect LAN users.
+  `just check-no-remote-login-records` (run via `just verify`) asserts the
+  built image carries no `/etc/avahi/services/{ssh,sftp-ssh}.service`.
+  `just verify-service-advertisements` is the host-network counterpart: on a
+  quiet test LAN it browses real records before and after starting and
+  restarting two instances, proving neither adds a remote-login record while
+  each instance's own IPP queue still resolves on its distinct port. It
+  needs host Avahi and `avahi-browse`, so it is not part of `just verify`,
+  and it claims nothing about physical discovery or printed paper.
 
 CI (`fsdk-ci.yml`) runs only `just validate` (a BuildStream graph check) on
 pull requests. The merge queue and `workflow_dispatch` run the full native

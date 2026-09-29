@@ -23,6 +23,10 @@ config:
         >> /layer/etc/passwd
       printf '%s\n' 'root:x:0:' 'nonroot:x:65532:' >> /layer/etc/group
       rm -rf /layer/run/dbus /layer/run/avahi-daemon
+      # Avahi's sample remote-login records do not describe this appliance.
+      # Keep the shared base's avahi-printing element and PAPPL's dynamic IPP publication.
+      rm -f /layer/etc/avahi/services/ssh.service \
+        /layer/etc/avahi/services/sftp-ssh.service
       rm -rf /layer/usr/lib/debug /layer/usr/share/cups/ipptool
       rm -f /layer/usr/bin/cupsd /layer/usr/bin/ippeveprinter
       chmod 0777 /layer/run

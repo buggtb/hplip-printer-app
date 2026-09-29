@@ -20,6 +20,22 @@ bst *ARGS:
 
 validate:
     just bst show --deps all oci/hplip-printer-app.bst
+    just check-entrypoint
+
+# Entrypoint checks that need no image build.
+check-entrypoint:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    shopt -s nullglob
+    tests=(tests/entrypoint-*.sh)
+    if [ ${#tests[@]} -eq 0 ]; then
+        echo "no tests/entrypoint-*.sh found" >&2
+        exit 1
+    fi
+    for t in "${tests[@]}"; do
+        echo "==> $t"
+        bash "$t"
+    done
 
 fetch:
     just bst source fetch --ignore-project-source-remotes --source-remote https://cache.projectbluefin.io:11001 --deps all oci/hplip-printer-app.bst
@@ -43,6 +59,25 @@ verify:
     tests/oci-appliance.sh
     tests/coexistence.sh
     just check-no-devel
+    just check-no-remote-login-records
+
+# Avahi's sample ssh/sftp-ssh records must not ship in an appliance that
+# serves neither. Image-level, so `just verify` catches a reintroduction
+# without host networking.
+check-no-remote-login-records:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    podman run --rm --entrypoint /usr/bin/bash "{{ image_ref }}" -ec '
+        test ! -e /etc/avahi/services/ssh.service
+        test ! -e /etc/avahi/services/sftp-ssh.service
+    '
+    echo "OK: no SSH/SFTP service records in {{ image_ref }}"
+
+# Requires host Avahi and avahi-browse on a quiet test LAN; not part of
+# `just verify`. Observes real records before and after startup/restart.
+verify-service-advertisements:
+    just build
+    tests/service-advertisements.sh
 
 # No devel content in the image (fsdk-containers printing-base consumer rule 5)
 check-no-devel:
