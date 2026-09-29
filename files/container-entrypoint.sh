@@ -13,52 +13,62 @@ if (( port < 1024 || port > 65535 )); then
 fi
 
 # Web admin is authenticated or disabled, never silently open (ChairLift
-# ADR-0016). name_re bounds auth-service to a PAM service name; server-options is checked against PAPPL's own
-# documented token set instead of being passed through verbatim.
-name_re='^[A-Za-z0-9_.-]+$'
-auth_service="${PRINTER_APP_AUTH_SERVICE:-}"
-admin_group="${PRINTER_APP_ADMIN_GROUP:-}"
-server_options="${PRINTER_APP_SERVER_OPTIONS:-}"
+# ADR-0016). Every value is validated and the container exits non-zero rather
+# than start with a setting the server would silently ignore or weaken: exit 64
+# marks a malformed value, exit 78 a value this image cannot honour.
+usage_error() {
+  printf '%s\n' "$1" >&2
+  exit 64
+}
+config_error() {
+  printf '%s\n' "$1" >&2
+  exit 78
+}
+
+# PAPPL server options this appliance forwards. Everything else pappl-retrofit
+# understands either weakens the appliance (no-tls, none) or is already the
+# default (web-log, web-network, web-security), so it is not accepted.
+allowed_server_options=(no-web-interface)
 extra_opts=()
-
-if [[ -n "$auth_service" ]]; then
-  if [[ ! "$auth_service" =~ $name_re ]]; then
-    printf 'PRINTER_APP_AUTH_SERVICE must be a PAM service name (letters, digits, ".", "_", "-")\n' >&2
-    exit 64
-  fi
-  # The shared printing base builds PAPPL with --disable-libpam, so
-  # pappl_authenticate_user() always fails and any auth-service answers every
-  # admin request with 401, locking every administrator out.
-  printf 'PRINTER_APP_AUTH_SERVICE=%s cannot be honoured: PAPPL is built without PAM in this image; use PRINTER_APP_SERVER_OPTIONS=no-web-interface instead\n' \
-    "$auth_service" >&2
-  exit 64
-fi
-
-# auth-service is always refused above, so an admin group can never be
-# backed by authentication.
-if [[ -n "$admin_group" ]]; then
-  printf 'PRINTER_APP_ADMIN_GROUP requires PRINTER_APP_AUTH_SERVICE; an admin group with no authentication does not restrict anything\n' >&2
-  exit 64
-fi
-
-if [[ -n "$server_options" ]]; then
-  allowed_options=(none dnssd-host no-multi-queue raw-socket usb-printer no-web-interface web-log web-network web-remote web-security no-tls)
-  IFS=',' read -r -a requested_options <<<"$server_options"
-  for option in "${requested_options[@]}"; do
-    known=0
-    for allowed in "${allowed_options[@]}"; do
-      if [[ "$option" == "$allowed" ]]; then
-        known=1
-        break
-      fi
+if [[ -n "${PRINTER_APP_SERVER_OPTIONS:-}" ]]; then
+  [[ "$PRINTER_APP_SERVER_OPTIONS" =~ ^[a-z-]+(,[a-z-]+)*$ ]] \
+    || usage_error 'PRINTER_APP_SERVER_OPTIONS must be a comma-separated list of PAPPL server options'
+  IFS=, read -r -a requested_server_options <<< "$PRINTER_APP_SERVER_OPTIONS"
+  for option in "${requested_server_options[@]}"; do
+    allowed=0
+    for candidate in "${allowed_server_options[@]}"; do
+      [[ "$option" == "$candidate" ]] && allowed=1
     done
-    if [[ "$known" -ne 1 ]]; then
-      printf 'PRINTER_APP_SERVER_OPTIONS has unknown option %s; allowed: %s\n' \
-        "$option" "${allowed_options[*]}" >&2
-      exit 64
-    fi
+    ((allowed)) || usage_error "PRINTER_APP_SERVER_OPTIONS contains unsupported option '${option}'; supported: ${allowed_server_options[*]}"
   done
-  extra_opts+=(-o "server-options=$server_options")
+  extra_opts+=(-o "server-options=$PRINTER_APP_SERVER_OPTIONS")
+fi
+
+# Syntax first (exit 64), then what this image can honour (exit 78), so a
+# malformed value is diagnosed the same way on any host.
+if [[ -n "${PRINTER_APP_AUTH_SERVICE:-}" ]]; then
+  [[ "$PRINTER_APP_AUTH_SERVICE" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] \
+    || usage_error 'PRINTER_APP_AUTH_SERVICE must be a PAM service name: letters, digits, "_", "." or "-", not starting with "." or "-"'
+fi
+if [[ -n "${PRINTER_APP_ADMIN_GROUP:-}" ]]; then
+  [[ "$PRINTER_APP_ADMIN_GROUP" =~ ^[A-Za-z_][A-Za-z0-9_.-]*$ ]] \
+    || usage_error 'PRINTER_APP_ADMIN_GROUP must be a group name: letters, digits, "_", "." or "-", starting with a letter or "_"'
+fi
+
+# The shared printing base builds PAPPL with --disable-libpam, so
+# pappl_authenticate_user() rejects every credential no matter which PAM
+# service is named, and once auth-service is set even localhost loses the
+# unauthenticated path. The presence of /etc/pam.d/<name> (the image ships
+# /etc/pam.d/cups with CUPS) says nothing about whether PAPPL can use it, so
+# refuse every value until the base builds PAPPL with PAM.
+if [[ -n "${PRINTER_APP_AUTH_SERVICE:-}" ]]; then
+  config_error "PRINTER_APP_AUTH_SERVICE=${PRINTER_APP_AUTH_SERVICE} cannot be honoured: this image's PAPPL is built without PAM, so auth-service would answer every administration request with 401; set PRINTER_APP_SERVER_OPTIONS=no-web-interface to disable web administration instead"
+fi
+
+# admin-group only restricts who may administer once auth-service
+# authenticates them, and auth-service is always refused above.
+if [[ -n "${PRINTER_APP_ADMIN_GROUP:-}" ]]; then
+  config_error 'PRINTER_APP_ADMIN_GROUP requires PRINTER_APP_AUTH_SERVICE; a group cannot be enforced without authentication'
 fi
 
 state=/var/lib/hplip-printer-app

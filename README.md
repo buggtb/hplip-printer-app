@@ -122,22 +122,23 @@ Because this appliance runs with `--network host`, the web admin UI is
 LAN-reachable and the only boundary is authorization. By default PAPPL
 leaves it open to anyone who can reach the port. Set one of the following
 before starting the container; the entrypoint validates every value and
-exits non-zero (64) instead of ever falling back to an unauthenticated
-admin UI:
+stops instead of ever falling back to an unauthenticated admin UI (exit `64`
+for a malformed value, `78` for a value this image cannot honour):
 
 - `PRINTER_APP_AUTH_SERVICE=<name>` — reserved for authenticating web admin
   requests (`-o auth-service=<name>`) once PAM is available. The shared
   printing base builds PAPPL without PAM, so any service name would lock every
-  administrator out; the entrypoint refuses every value at startup.
+  administrator out, including from `localhost`; the entrypoint refuses every
+  well-formed value with exit `78`, whether or not `/etc/pam.d/<name>` exists
+  (`/etc/pam.d/cups` ships with CUPS).
 - `PRINTER_APP_ADMIN_GROUP=<group>` — the OS group allowed to administer the
   server (`-o admin-group=<group>`). Requires `PRINTER_APP_AUTH_SERVICE`, so
-  it is refused as well until PAM is available.
-- `PRINTER_APP_SERVER_OPTIONS=<opt[,opt...]>` — a comma-separated list of
-  PAPPL server options (`-o server-options=<opts>`), checked against PAPPL's
-  documented tokens (`none`, `dnssd-host`, `no-multi-queue`, `raw-socket`,
-  `usb-printer`, `no-web-interface`, `web-log`, `web-network`, `web-remote`,
-  `web-security`, `no-tls`). Use `no-web-interface` to disable the web admin
-  UI entirely while IPP printing keeps working.
+  it is refused as well (exit `78`) until PAM is available.
+- `PRINTER_APP_SERVER_OPTIONS=<opt[,opt...]>` — PAPPL server options forwarded
+  as `-o server-options=<opts>`. Only `no-web-interface` is accepted; other
+  PAPPL options either weaken the appliance (`no-tls`, `none`) or are already
+  the default, so they are rejected with exit `64`. `no-web-interface`
+  disables the web admin UI entirely while IPP printing keeps working.
 
 `PRINTER_APP_SERVER_OPTIONS=no-web-interface` is therefore the only supported
 way to secure the web admin interface today. It also removes the per-printer
