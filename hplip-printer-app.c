@@ -1813,6 +1813,17 @@ hplip_printer_extra_web_if(pappl_printer_t *printer, // I - Printer
   // PostScript query code for printer settings
   prSetupDeviceSettingsPage(printer, data);
 
+  // pappl-retrofit registers the "Device Settings" admin form without
+  // checking the server options, so remove it when no-web-interface is set
+  if (!(papplSystemGetOptions(system) & PAPPL_SOPTIONS_WEB_INTERFACE))
+  {
+    char path[256];                         // Device settings page path
+
+    papplPrinterGetPath(printer, "device", path, sizeof(path));
+    papplSystemRemoveResource(system, path);
+    papplPrinterRemoveLink(printer, "Device Settings");
+  }
+
   papplPrinterGetDriverData(printer, &driver_data);
   if (strcasestr(driver_data.make_and_model, "proprietary plugin"))
   {

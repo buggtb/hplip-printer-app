@@ -125,14 +125,13 @@ before starting the container; the entrypoint validates every value and
 exits non-zero (64) instead of ever falling back to an unauthenticated
 admin UI:
 
-- `PRINTER_APP_AUTH_SERVICE=<name>` — the PAM service name used to
-  authenticate web admin requests (`-o auth-service=<name>`). The image must
-  ship a matching `/etc/pam.d/<name>` file; the entrypoint refuses to start
-  if it is missing.
-- `PRINTER_APP_ADMIN_GROUP=<group>` — the OS group allowed to administer
-  the server (`-o admin-group=<group>`). Requires `PRINTER_APP_AUTH_SERVICE`
-  to also be set (an admin group with no authentication restricts nothing)
-  and the group must already exist in the image.
+- `PRINTER_APP_AUTH_SERVICE=<name>` — reserved for authenticating web admin
+  requests (`-o auth-service=<name>`) once PAM is available. The shared
+  printing base builds PAPPL without PAM, so any service name would lock every
+  administrator out; the entrypoint refuses every value at startup.
+- `PRINTER_APP_ADMIN_GROUP=<group>` — the OS group allowed to administer the
+  server (`-o admin-group=<group>`). Requires `PRINTER_APP_AUTH_SERVICE`, so
+  it is refused as well until PAM is available.
 - `PRINTER_APP_SERVER_OPTIONS=<opt[,opt...]>` — a comma-separated list of
   PAPPL server options (`-o server-options=<opts>`), checked against PAPPL's
   documented tokens (`none`, `dnssd-host`, `no-multi-queue`, `raw-socket`,
@@ -140,11 +139,9 @@ admin UI:
   `web-security`, `no-tls`). Use `no-web-interface` to disable the web admin
   UI entirely while IPP printing keeps working.
 
-This image does not currently ship a PAM stack under `/etc/pam.d`, so
-`PRINTER_APP_SERVER_OPTIONS=no-web-interface` is the only supported mode
-today; `PRINTER_APP_AUTH_SERVICE`/`PRINTER_APP_ADMIN_GROUP` are validated and
-forwarded, but starting them will fail until a PAM service is added to the
-image.
+`PRINTER_APP_SERVER_OPTIONS=no-web-interface` is therefore the only supported
+way to secure the web admin interface today. It also removes the per-printer
+"Device Settings" page that pappl-retrofit registers.
 
 ### Isolating LAN discovery and USB access between coexisting appliances
 

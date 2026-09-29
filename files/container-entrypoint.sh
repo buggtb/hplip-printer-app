@@ -13,8 +13,7 @@ if (( port < 1024 || port > 65535 )); then
 fi
 
 # Web admin is authenticated or disabled, never silently open (ChairLift
-# ADR-0016). name_re bounds auth-service and admin-group to values PAM and
-# getent can look up safely; server-options is checked against PAPPL's own
+# ADR-0016). name_re bounds auth-service to a PAM service name; server-options is checked against PAPPL's own
 # documented token set instead of being passed through verbatim.
 name_re='^[A-Za-z0-9_.-]+$'
 auth_service="${PRINTER_APP_AUTH_SERVICE:-}"
@@ -27,28 +26,19 @@ if [[ -n "$auth_service" ]]; then
     printf 'PRINTER_APP_AUTH_SERVICE must be a PAM service name (letters, digits, ".", "_", "-")\n' >&2
     exit 64
   fi
-  if [[ ! -e "/etc/pam.d/$auth_service" ]]; then
-    printf 'PRINTER_APP_AUTH_SERVICE=%s has no /etc/pam.d/%s in this image; ship that PAM service or use PRINTER_APP_SERVER_OPTIONS=no-web-interface instead\n' \
-      "$auth_service" "$auth_service" >&2
-    exit 64
-  fi
-  extra_opts+=(-o "auth-service=$auth_service")
+  # The shared printing base builds PAPPL with --disable-libpam, so
+  # pappl_authenticate_user() always fails and any auth-service answers every
+  # admin request with 401, locking every administrator out.
+  printf 'PRINTER_APP_AUTH_SERVICE=%s cannot be honoured: PAPPL is built without PAM in this image; use PRINTER_APP_SERVER_OPTIONS=no-web-interface instead\n' \
+    "$auth_service" >&2
+  exit 64
 fi
 
+# auth-service is always refused above, so an admin group can never be
+# backed by authentication.
 if [[ -n "$admin_group" ]]; then
-  if [[ -z "$auth_service" ]]; then
-    printf 'PRINTER_APP_ADMIN_GROUP requires PRINTER_APP_AUTH_SERVICE; an admin group with no authentication does not restrict anything\n' >&2
-    exit 64
-  fi
-  if [[ ! "$admin_group" =~ $name_re ]]; then
-    printf 'PRINTER_APP_ADMIN_GROUP must be a group name (letters, digits, ".", "_", "-")\n' >&2
-    exit 64
-  fi
-  if ! getent group "$admin_group" >/dev/null; then
-    printf 'PRINTER_APP_ADMIN_GROUP=%s does not exist in this image\n' "$admin_group" >&2
-    exit 64
-  fi
-  extra_opts+=(-o "admin-group=$admin_group")
+  printf 'PRINTER_APP_ADMIN_GROUP requires PRINTER_APP_AUTH_SERVICE; an admin group with no authentication does not restrict anything\n' >&2
+  exit 64
 fi
 
 if [[ -n "$server_options" ]]; then

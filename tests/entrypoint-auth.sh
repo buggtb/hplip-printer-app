@@ -29,18 +29,6 @@ prologue="$work/auth-prologue.sh"
 head -n "$((marker_line - 1))" "$entrypoint" >"$prologue"
 printf 'printf "%%s\\n" "${extra_opts[*]:-}"\n' >>"$prologue"
 
-# A PAM service file and a group that genuinely exist on the test host, used
-# only to prove the happy path forwards the value; the entrypoint itself
-# never invents these, it just looks them up.
-real_service=login
-if [ ! -e "/etc/pam.d/$real_service" ]; then
-    real_service="$(basename "$(ls /etc/pam.d | head -n 1)")"
-fi
-real_group=root
-if ! getent group "$real_group" >/dev/null 2>&1; then
-    real_group="$(getent group | head -n 1 | cut -d: -f1)"
-fi
-
 failures=0
 
 report() {
@@ -67,33 +55,21 @@ run() {
 
 run 'no auth env set adds nothing' 0 ''
 
-run 'valid auth service is forwarded' \
-    0 "-o auth-service=$real_service" \
-    "PRINTER_APP_AUTH_SERVICE=$real_service"
-
 run 'auth service with unsafe characters is rejected' \
     64 'PRINTER_APP_AUTH_SERVICE must be a PAM service name (letters, digits, ".", "_", "-")' \
     'PRINTER_APP_AUTH_SERVICE=has space'
 
-run 'auth service with no matching PAM file is rejected' \
-    64 "PRINTER_APP_AUTH_SERVICE=does-not-exist-anywhere has no /etc/pam.d/does-not-exist-anywhere in this image; ship that PAM service or use PRINTER_APP_SERVER_OPTIONS=no-web-interface instead" \
-    'PRINTER_APP_AUTH_SERVICE=does-not-exist-anywhere'
-
-run 'admin group with matching auth service is forwarded' \
-    0 "-o auth-service=$real_service -o admin-group=$real_group" \
-    "PRINTER_APP_AUTH_SERVICE=$real_service" "PRINTER_APP_ADMIN_GROUP=$real_group"
+run 'auth service is refused while PAPPL lacks PAM' \
+    64 'PRINTER_APP_AUTH_SERVICE=cups cannot be honoured: PAPPL is built without PAM in this image; use PRINTER_APP_SERVER_OPTIONS=no-web-interface instead' \
+    'PRINTER_APP_AUTH_SERVICE=cups'
 
 run 'admin group without auth service is rejected' \
     64 'PRINTER_APP_ADMIN_GROUP requires PRINTER_APP_AUTH_SERVICE; an admin group with no authentication does not restrict anything' \
-    "PRINTER_APP_ADMIN_GROUP=$real_group"
+    'PRINTER_APP_ADMIN_GROUP=root'
 
-run 'admin group with unsafe characters is rejected' \
-    64 'PRINTER_APP_ADMIN_GROUP must be a group name (letters, digits, ".", "_", "-")' \
-    "PRINTER_APP_AUTH_SERVICE=$real_service" 'PRINTER_APP_ADMIN_GROUP=has space'
-
-run 'admin group that does not exist is rejected' \
-    64 'PRINTER_APP_ADMIN_GROUP=does-not-exist-anywhere does not exist in this image' \
-    "PRINTER_APP_AUTH_SERVICE=$real_service" 'PRINTER_APP_ADMIN_GROUP=does-not-exist-anywhere'
+run 'admin group with auth service is still refused' \
+    64 'PRINTER_APP_AUTH_SERVICE=cups cannot be honoured: PAPPL is built without PAM in this image; use PRINTER_APP_SERVER_OPTIONS=no-web-interface instead' \
+    'PRINTER_APP_AUTH_SERVICE=cups' 'PRINTER_APP_ADMIN_GROUP=root'
 
 run 'single valid server option is forwarded' \
     0 '-o server-options=no-web-interface' \
@@ -110,11 +86,6 @@ run 'unknown server option is rejected' \
 run 'one bad option among good ones is still rejected' \
     64 'PRINTER_APP_SERVER_OPTIONS has unknown option bogus-option; allowed: none dnssd-host no-multi-queue raw-socket usb-printer no-web-interface web-log web-network web-remote web-security no-tls' \
     'PRINTER_APP_SERVER_OPTIONS=no-web-interface,bogus-option'
-
-run 'auth service, admin group and server options combine' \
-    0 "-o auth-service=$real_service -o admin-group=$real_group -o server-options=no-tls" \
-    "PRINTER_APP_AUTH_SERVICE=$real_service" "PRINTER_APP_ADMIN_GROUP=$real_group" \
-    'PRINTER_APP_SERVER_OPTIONS=no-tls'
 
 if [ "$failures" -ne 0 ]; then
     printf '%s check(s) failed\n' "$failures" >&2
